@@ -1,0 +1,62 @@
+<p class="lead">A many-to-one join can silently multiply a measure when the dimension contains repeated keys. These two repository examples use the same schema and assertion to make that failure visible.</p>
+
+<h2 id="broken-join">The broken join</h2>
+<p><code>examples/broken_join/pipeline.py</code> assumes that each customer key identifies one dimension row. Spark joins every matching row, so a duplicate customer repeats the order amount before the aggregation.</p>
+<pre><code class="language-python">{{broken_pipeline}}</code></pre>
+<p>The function is ordinary PySpark code. PipeFuzz imports it, passes generated <code>orders</code> and <code>customers</code> DataFrames as keyword arguments, and materializes its result.</p>
+
+<h2 id="shared-configuration">Declare the property</h2>
+<p>Both example directories contain the following configuration. The relationship connects orders to customers; <code>join_amplification</code> generates matching keys with duplicate rows on the customer side. The invariant compares the sum of absolute <code>amount</code> values with the sum of absolute <code>total_amount</code> values.</p>
+<pre><code class="language-yaml">{{example_config}}</code></pre>
+<p><code>primary_key: [customer_id]</code> describes the intended key. It does not suppress adversarial duplicate keys, and it does not independently assert output uniqueness. Add an explicit <code>unique_key</code> invariant when that is a property you need to test. See the <a href="configuration.html">configuration reference</a> and <a href="checks.html">scenario and invariant reference</a>.</p>
+
+<h2 id="run-the-examples">Run both versions</h2>
+<p>After the <a href="quickstart.html#install">checkout installation</a>, use your environment's <code>pipefuzz</code> executable. The following commands assume it is on <code>PATH</code>:</p>
+<pre><code class="language-bash">pipefuzz test examples/broken_join/pipeline.py::transform --config examples/broken_join/pipefuzz.yaml --max-examples 1 --seed 20260820
+pipefuzz test examples/safe_join/pipeline.py::transform --config examples/safe_join/pipefuzz.yaml --max-examples 1 --seed 20260820</code></pre>
+<p>The broken example is expected to exit <code>1</code>; the protected example is expected to exit <code>0</code>. Run each command independently if your shell or CI runner stops at the first nonzero status.</p>
+
+<h2 id="minimal-case">A recorded minimal failure</h2>
+<p>The 2026-09-29 release audit ran the installed 0.1.0 wheel on Windows, Python 3.13, Java 17, and Hypothesis 6.165.10 with seed <code>20260820</code>. The following tables and excerpt are an abridged presentation of that observed failure, not a promise of identical generated records across versions.</p>
+<h3 id="case-orders">Orders · one fact row</h3>
+<p>Schema: <code>customer_id: integer</code> and <code>amount: double</code>, both required.</p>
+<div class="table-wrap"><table>
+  <thead><tr><th scope="col">customer_id</th><th scope="col">amount</th></tr></thead>
+  <tbody><tr><td>1</td><td>1.0</td></tr></tbody>
+</table></div>
+<h3 id="case-customers">Customers · two matching rows</h3>
+<p>Schema: <code>customer_id: integer</code> and <code>country: string</code>, both required. Here <code>""</code> represents the empty string.</p>
+<div class="table-wrap"><table>
+  <thead><tr><th scope="col">customer_id</th><th scope="col">country</th></tr></thead>
+  <tbody><tr><td>1</td><td><code>""</code></td></tr><tr><td>1</td><td><code>""</code></td></tr></tbody>
+</table></div>
+<p>Joining the one order to both customer rows repeats its amount. The grouped output contains <code>total_amount = 2.0</code>, while the input absolute total is <code>1.0</code>.</p>
+<pre><code class="language-text">FAILED
+
+Classification: INVARIANT_VIOLATION
+
+Invariant
+  no_join_amplification
+
+Failing scenario
+  join_amplification
+
+Reason
+  Output measure exceeds the input measure; a join may have amplified fact values
+
+Context
+  input_absolute_total: 1.0
+  output_absolute_total: 2.0
+  tolerance: 1.001E-9</code></pre>
+<p>The full terminal report also contains the input schemas, record tables, Hypothesis version, seed, and a reproduction command. In this audit, Hypothesis executed four examples including shrinking, although <code>--max-examples</code> was set to <code>1</code>.</p>
+
+<h2 id="safe-join">Protect the measure before joining</h2>
+<p><code>examples/safe_join/pipeline.py</code> reduces the customer dimension to one row per key before the join. The recorded audit passed the same configured check with one generated example.</p>
+<pre><code class="language-python">{{safe_pipeline}}</code></pre>
+<aside class="callout">
+  <p><strong>Choose a survivor policy for real data.</strong> <code>dropDuplicates(["customer_id"])</code> does not define which record survives when rows share a customer ID but disagree on country or other attributes. The selected row can be nondeterministic. A production transformation needs an explicit rule, such as a well-defined ordering with a tie-breaker, if those attributes matter.</p>
+</aside>
+<p>The name “safe join” refers to this example's measure-amplification check. It does not certify dimension quality, attribute correctness, completeness, or every possible input. This invariant permits a lower output total, so dropped or unmatched orders need a separate assertion if losing them is unacceptable. See <a href="checks.html">check semantics</a> before applying the pattern.</p>
+
+<h2 id="adapt-the-example">Adapt the example</h2>
+<p>Keep the property specific to your pipeline. <code>no_join_amplification</code> is suitable when a measure should not increase across the transformation; a legitimate one-to-many expansion may need different assertions. Add the schemas and relationships you actually use, then select scenarios that challenge those assumptions. The <a href="cli.html#reproduce">CLI reproduction guidance</a> explains how to retain the conditions of a discovered failure.</p>

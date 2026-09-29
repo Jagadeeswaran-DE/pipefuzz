@@ -1,0 +1,68 @@
+<p class="lead">The CLI loads a Python transformation and a YAML contract, runs each configured scenario in local Spark, and reports either a passing check or a classified failure with a process exit code.</p>
+
+<h2 id="usage">Usage</h2>
+<pre><code class="language-text">pipefuzz test &lt;file-or-module&gt;::&lt;function&gt; [options]
+pipefuzz --help
+pipefuzz --version
+pipefuzz test --help</code></pre>
+<p>Run the executable installed into your Python environment. For commands that work without activating a virtual environment, see the <a href="quickstart.html">quickstart</a>.</p>
+
+<h2 id="targets">Transformation targets</h2>
+<p>A target has exactly the form <code>&lt;file-or-module&gt;::&lt;function&gt;</code>. The final attribute must be callable; dotted function names such as <code>Class.method</code> are not accepted.</p>
+<pre><code class="language-bash">pipefuzz test examples/broken_join/pipeline.py::transform
+pipefuzz test my_package.pipeline::transform --config path/to/pipefuzz.yaml</code></pre>
+<p>File paths can be absolute or relative to the current working directory. A reference ending in <code>.py</code>, containing a slash or backslash, or matching an existing path is handled as a file target. Otherwise PipeFuzz imports it as a Python module, which must be importable in the active environment.</p>
+<p>The function must accept keyword arguments matching every configured input name and return one PySpark <code>DataFrame</code>. File targets can import sibling Python modules; PipeFuzz scopes those imports to the target's directory. Imports and the transformation run as ordinary Python in your process.</p>
+
+<h2 id="configuration-discovery">Configuration discovery</h2>
+<div class="table-wrap"><table>
+  <thead><tr><th scope="col">Invocation</th><th scope="col">Configuration used</th></tr></thead>
+  <tbody>
+    <tr><td>Any target with <code>--config PATH</code></td><td>That explicit path; a relative path is resolved from the current working directory.</td></tr>
+    <tr><td>File target without <code>--config</code></td><td><code>pipefuzz.yaml</code> in the resolved Python file's parent directory.</td></tr>
+    <tr><td>Module target without <code>--config</code></td><td><code>pipefuzz.yaml</code> in the current working directory.</td></tr>
+  </tbody>
+</table></div>
+<p>There is no search through ancestor directories. Configuration is loaded before the transformation is imported. A missing or invalid configuration produces <code>PIPEFUZZ_CONFIGURATION_ERROR</code>. See the <a href="configuration.html">YAML reference</a> for supported fields.</p>
+
+<h2 id="options">Options</h2>
+<div class="table-wrap"><table>
+  <thead><tr><th scope="col">Option</th><th scope="col">Scope / default</th><th scope="col">Behavior</th></tr></thead>
+  <tbody>
+    <tr><td><code>--config PATH</code></td><td><code>test</code> / discovered</td><td>Use an explicit YAML configuration.</td></tr>
+    <tr><td><code>--max-examples N</code></td><td><code>test</code> / <code>10</code></td><td>Positive integer passed to Hypothesis for each enabled scenario. Shrinking and failure reproduction can execute additional examples.</td></tr>
+    <tr><td><code>--seed N</code></td><td><code>test</code> / generated</td><td>Integer from <code>0</code> through <code>18446744073709551615</code> (2<sup>64</sup> − 1). If omitted, PipeFuzz generates and reports a 63-bit seed.</td></tr>
+    <tr><td><code>--verbose</code></td><td><code>test</code> / off</td><td>Set Spark logging to <code>INFO</code> instead of <code>WARN</code> and include available tracebacks in error reports.</td></tr>
+    <tr><td><code>-h</code>, <code>--help</code></td><td>Root or <code>test</code></td><td>Print help for the selected command and exit <code>0</code>.</td></tr>
+    <tr><td><code>--version</code></td><td>Root</td><td>Print <code>PipeFuzz 0.1.0</code> for this checkout and exit <code>0</code>.</td></tr>
+  </tbody>
+</table></div>
+<p>Choose scenarios and invariants in YAML; there are no CLI flags for selecting them. Scenarios execute in configuration order, and the run returns on its first discovered failure.</p>
+
+<h2 id="exit-codes">Exit codes and classifications</h2>
+<div class="table-wrap"><table>
+  <thead><tr><th scope="col">Code</th><th scope="col">Report classification</th><th scope="col">Meaning</th></tr></thead>
+  <tbody>
+    <tr><td><code>0</code></td><td><code>PASSED</code></td><td>No configured invariant was violated by the executed generated cases.</td></tr>
+    <tr><td><code>1</code></td><td><code>INVARIANT_VIOLATION</code></td><td>A generated case violated a configured invariant.</td></tr>
+    <tr><td><code>2</code></td><td><code>PIPEFUZZ_CONFIGURATION_ERROR</code></td><td>The configuration, target, import, or callable signature is invalid; a configured invariant can also reveal a runtime contract error.</td></tr>
+    <tr><td><code>3</code></td><td><code>TRANSFORMATION_EXCEPTION</code></td><td>The user function, its output materialization, or return-type validation raised an exception.</td></tr>
+    <tr><td><code>4</code></td><td><code>SPARK_ERROR</code></td><td>Local Spark startup or PipeFuzz-managed input materialization failed.</td></tr>
+    <tr><td><code>5</code></td><td><code>PIPEFUZZ_INTERNAL_ERROR</code></td><td>An unexpected error crossed PipeFuzz's internal execution boundary.</td></tr>
+  </tbody>
+</table></div>
+<p>Argument-parser failures, such as an unknown flag or invalid seed, also exit <code>2</code> but use the parser's usage/error text rather than a classified PipeFuzz report. A Spark <code>AnalysisException</code> raised by user transformation logic belongs to <code>TRANSFORMATION_EXCEPTION</code>; the exception's library name alone does not decide the classification.</p>
+
+<h2 id="reports">Read a report</h2>
+<p>Run reports include the target, configured scenarios, generated-example count, Hypothesis version, and seed. A case failure adds the failing scenario, input schemas and minimized records, reason, and available invariant context. Early configuration failures can occur before a run exists and therefore do not have generated-case or reproduction details.</p>
+<p>PipeFuzz writes passing reports to standard output and failing reports to standard error. Spark diagnostics may also appear in the terminal. Use the process exit status and classification to interpret the result; a warning line alone does not establish failure.</p>
+<p>Reports intentionally display generated records and project schema names. Take that into account when retaining or sharing terminal logs. The <a href="examples.html#minimal-case">example failure</a> explains how a minimized case connects to the observed measure.</p>
+
+<h2 id="reproduce">Reproduce a failure</h2>
+<pre><code class="language-bash">pipefuzz test examples/broken_join/pipeline.py::transform --config examples/broken_join/pipefuzz.yaml --max-examples 1 --seed 20260820</code></pre>
+<p>Use the <code>Reproduce</code> command printed by the failing run. It includes the target, resolved configuration path, example limit, and seed; arguments use platform-appropriate quoting. Replace the executable with your virtual environment's path if needed.</p>
+<p>Keep the same transformation code, configuration contents and scenario order, target, working directory, and example limit. Preserve the PipeFuzz, Hypothesis, PySpark, Python, and Java versions for comparable results. A seed controls generation; it cannot stabilize a transformation that depends on time, external state, randomness, or nondeterministic Spark behavior.</p>
+<p>The report retains the original target text and an absolute configuration path. If you move the checkout or run on another machine, update those paths without changing the tested code or configuration. Changing Hypothesis or PipeFuzz versions can change generated values or shrinking behavior even with the same seed.</p>
+
+<h2 id="execution-scope">Execution scope</h2>
+<p>One local Spark session is reused across a CLI run. Generated inputs and transformation outputs are materialized locally, and output collection can exceed the input size. Keep this workflow focused on small logical tests. The <a href="architecture.html">architecture guide</a> describes the runtime, and the <a href="checks.html">checks reference</a> explains what each passing result establishes.</p>

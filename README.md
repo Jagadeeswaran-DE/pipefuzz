@@ -6,6 +6,14 @@ PipeFuzz is a property-based testing tool for PySpark DataFrame transformations.
 
 PipeFuzz v0.1 is intentionally narrow: Python functions in, PySpark DataFrames out, local execution only.
 
+## Documentation
+
+Read the [PipeFuzz documentation website](https://jagadeeswaran-de.github.io/pipefuzz-docs/)
+for a guided quickstart, a broken-versus-safe join walkthrough, the complete YAML
+reference, scenario and invariant semantics, CLI help, architecture, and limitations.
+The documentation is public; access to this package repository is still required
+to clone and install it. See [docs/README.md](docs/README.md) to build or update the site.
+
 ## Installation from a checkout
 
 PipeFuzz is not represented as published on PyPI. From a project checkout, use Python 3.10–3.13 and Java 17 or later:

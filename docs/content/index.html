@@ -1,0 +1,22 @@
+<p class="lead">PipeFuzz tests your PySpark transformations with small, deliberately awkward datasets. You describe the input schema and the rules that should hold. It generates records, runs real Spark, and reduces failures to a case you can investigate.</p>
+<div class="actions"><a class="button" href="quickstart.html">Run your first test</a><a class="button secondary" href="examples.html">Explore the join example</a></div>
+<div class="callout"><strong>v0.1 is focused, by design.</strong> Python functions in, PySpark DataFrames out. Local execution. Explicit checks. No production data required.</div>
+
+<h2 id="why-pipefuzz">Why use PipeFuzz?</h2>
+<p>A pipeline can pass a test with clean sample data and still fail when a dimension contains duplicates or a column contains NULL. Instead of writing one expected output for one hand-picked input, you tell PipeFuzz a property that should remain true across generated inputs.</p>
+<p>For example: <strong>“Joining orders to customers must not increase the total order amount.”</strong> PipeFuzz supplies matching keys and duplicate customer records to challenge that assumption.</p>
+<div class="result"><span class="result-label">EXAMPLE · JOIN AMPLIFICATION</span><p>One order with amount <code>1.0</code> matches two customer rows. The broken join counts it twice.</p><div class="measure"><div><small>Input absolute total</small><strong>1.0</strong></div><div class="separator" aria-hidden="true">→</div><div><small>Output absolute total</small><strong>2.0</strong></div></div></div>
+
+<h2 id="how-it-works">Four steps to a useful failure</h2>
+<div class="flow" aria-label="PipeFuzz testing lifecycle"><div><span>01 / DEFINE</span><strong>Describe a contract</strong><p>Input types, relationships, and the invariants you expect.</p></div><div><span>02 / GENERATE</span><strong>Challenge the inputs</strong><p>Hypothesis builds small, schema-valid adversarial records.</p></div><div><span>03 / EXECUTE</span><strong>Run real Spark</strong><p>Your transformation runs against local DataFrames.</p></div><div><span>04 / REDUCE</span><strong>Inspect a small case</strong><p>Failures are shrunk and reported with a reproduction seed.</p></div></div>
+<p>An <strong>invariant</strong> is the rule being checked. A <strong>scenario</strong> is the kind of input used to challenge it. For example, <code>join_amplification</code> generates duplicate dimension keys; <code>no_join_amplification</code> checks that the configured measure does not increase.</p>
+
+<h2 id="choose-a-path">Find what you need</h2>
+<div class="cards"><a class="card" href="quickstart.html"><span>First time here</span><h3>Install and run</h3><p>Set up Python and Java, then compare the broken and safe examples.</p></a><a class="card" href="configuration.html"><span>Test your own code</span><h3>Write a configuration</h3><p>Map your DataFrames, key relationships, and expected behavior.</p></a><a class="card" href="checks.html"><span>Choose the right assertion</span><h3>Understand the checks</h3><p>NULLs, duplicates, measure totals, and output determinism.</p></a><a class="card" href="cli.html"><span>A run failed</span><h3>Read and reproduce it</h3><p>Interpret the result, reuse its seed, and distinguish error types.</p></a></div>
+
+<h2 id="what-a-pass-means">What does a passing run mean?</h2>
+<p>It means the sampled generated inputs did not violate your configured invariants. It does <strong>not</strong> prove that every input is safe, that the business rules are complete, or that a stateful pipeline is idempotent.</p>
+<p>Use PipeFuzz alongside ordinary unit tests, known business examples, and integration tests. It adds adversarial coverage; it does not replace them.</p>
+
+<h2 id="project-status">Project status</h2>
+<p>PipeFuzz <strong>0.1.0</strong> is an alpha package, installed from a source checkout. There is no claimed PyPI release. The repository includes real-Spark tests and an adversarial release audit; see <a href="architecture.html#verification">verification and limitations</a> before relying on broader compatibility claims.</p>

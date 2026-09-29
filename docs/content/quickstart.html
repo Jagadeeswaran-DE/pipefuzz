@@ -1,0 +1,55 @@
+<p class="lead">Run a real PySpark transformation against small generated inputs, then use the first failure to understand the violated property. The bundled join examples take you from an inflated measure to a passing check.</p>
+
+<h2 id="requirements">Requirements</h2>
+<p>Use Python 3.10–3.13 and Java 17 or later, with Java available to your shell. PipeFuzz 0.1.0 declares these Python versions in its package metadata. The recorded release audit executed Windows with Python 3.13 and Java 17; the other declared Python versions and macOS/Linux were not executed in that audit.</p>
+<p>Installation is from a repository checkout. A PyPI release is not claimed. Git is needed only if you clone the repository.</p>
+
+<h2 id="get-the-code">Get the code</h2>
+<pre><code class="language-bash">git clone https://github.com/Jagadeeswaran-DE/pipefuzz.git
+cd pipefuzz</code></pre>
+<div class="callout warning"><strong>The package source is currently private.</strong> This documentation is public, but cloning the package requires access to <code>Jagadeeswaran-DE/pipefuzz</code> and an authenticated Git client. A GitHub 404 can mean your account does not have access. You can also use an existing authorized checkout. Run the commands below from its root directory.</div>
+
+<h2 id="install">Install in a virtual environment</h2>
+<p>These commands use the virtual environment's executables directly, so shell activation is optional. Check that the selected Python interpreter is within the supported range before creating the environment.</p>
+<h3 id="install-windows">Windows · PowerShell</h3>
+<pre><code class="language-powershell">python --version
+java -version
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install .
+.\.venv\Scripts\pipefuzz.exe --version</code></pre>
+<h3 id="install-posix">macOS / Linux · POSIX shell</h3>
+<pre><code class="language-bash">python3 --version
+java -version
+python3 -m venv .venv
+.venv/bin/python -m pip install .
+.venv/bin/pipefuzz --version</code></pre>
+<p>The version command prints <code>PipeFuzz 0.1.0</code> for this checkout. If Java is unavailable, install a compatible JDK and configure <code>JAVA_HOME</code> and <code>PATH</code> before running a transformation. For an editable development install, replace <code>pip install .</code> with <code>pip install -e ".[dev]"</code>.</p>
+
+<h2 id="find-a-failure">Find the broken join</h2>
+<p>The first example joins orders to customers and sums each country's order amounts. A duplicated customer key makes the same order contribute more than once. The configuration asks PipeFuzz to generate that structure and checks the resulting measure.</p>
+<h3 id="run-windows">Windows · PowerShell</h3>
+<pre><code class="language-powershell">.\.venv\Scripts\pipefuzz.exe test examples/broken_join/pipeline.py::transform --config examples/broken_join/pipefuzz.yaml --max-examples 1 --seed 20260820
+$LASTEXITCODE</code></pre>
+<h3 id="run-posix">macOS / Linux · POSIX shell</h3>
+<pre><code class="language-bash">.venv/bin/pipefuzz test examples/broken_join/pipeline.py::transform --config examples/broken_join/pipefuzz.yaml --max-examples 1 --seed 20260820
+echo $?</code></pre>
+<p>The intended result is <code>INVARIANT_VIOLATION</code> with exit code <code>1</code>. That is the demonstration succeeding: PipeFuzz found a violation of <code>no_join_amplification</code>. The report includes the failing scenario, minimized input records and schemas, the reason, and a reproduction command. The <a href="examples.html#minimal-case">recorded audit case</a> shows one order's amount increasing from 1.0 to 2.0.</p>
+<p><code>--max-examples 1</code> limits the initial Hypothesis exploration for each scenario. Failure reproduction and shrinking can execute additional examples, so the report may show a larger count.</p>
+
+<h2 id="try-the-fix">Try the protected join</h2>
+<p>Run the companion example, which deduplicates customer keys before joining.</p>
+<h3 id="safe-windows">Windows · PowerShell</h3>
+<pre><code class="language-powershell">.\.venv\Scripts\pipefuzz.exe test examples/safe_join/pipeline.py::transform --config examples/safe_join/pipefuzz.yaml --max-examples 1 --seed 20260820
+$LASTEXITCODE</code></pre>
+<h3 id="safe-posix">macOS / Linux · POSIX shell</h3>
+<pre><code class="language-bash">.venv/bin/pipefuzz test examples/safe_join/pipeline.py::transform --config examples/safe_join/pipefuzz.yaml --max-examples 1 --seed 20260820
+echo $?</code></pre>
+<p>The recorded audit returned <code>PASSED</code> and exit code <code>0</code>. A passing run means the generated cases did not violate the configured invariant; it does not establish correctness for every possible input. Read the <a href="examples.html#safe-join">deduplication caveat</a> before using this pattern with conflicting dimension records.</p>
+
+<h2 id="test-your-transformation">Test your transformation</h2>
+<ol>
+  <li>Expose a Python callable that accepts keyword arguments matching the configured input names and returns one PySpark <code>DataFrame</code>.</li>
+  <li>Define input schemas, row bounds, any relationships, scenarios, and explicit invariants in <code>pipefuzz.yaml</code>.</li>
+  <li>Run <code>pipefuzz test path/to/pipeline.py::transform</code> using your environment's CLI. With no <code>--config</code>, a file target uses <code>pipefuzz.yaml</code> beside that file.</li>
+</ol>
+<p>Start with the <a href="configuration.html">configuration reference</a> and select <a href="checks.html">checks that match your transformation's semantics</a>. PipeFuzz runs locally and collects generated outputs to the driver, so keep transformations and generated results small. The <a href="architecture.html">architecture guide</a> explains the execution boundary.</p>

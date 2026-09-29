@@ -1,0 +1,159 @@
+<p class="lead">Describe the inputs your transformation accepts, the difficult cases to generate, and the properties that must hold. PipeFuzz reads these settings from a YAML version 1 file.</p>
+
+<h2 id="complete-example">A complete configuration</h2>
+<p>This configuration exercises all five scenarios and all four invariant types. It expects a transformation with <code>orders</code> and <code>customers</code> arguments that returns <code>country</code> and <code>total_amount</code> columns. The configuration is valid; whether it passes depends on the transformation. For a ready-to-run pair of transformations, see <a href="examples.html">the join examples</a>.</p>
+<pre><code class="language-yaml" id="complete-configuration">version: 1
+inputs:
+  orders:
+    schema:
+      - {name: customer_id, type: integer, nullable: false}
+      - {name: amount, type: double, nullable: true}
+    rows: {min: 1, max: 4}
+  customers:
+    schema:
+      - {name: customer_id, type: integer, nullable: false}
+      - {name: country, type: string, nullable: false}
+    primary_key: [customer_id]
+    rows: {min: 1, max: 4}
+
+relationships:
+  - name: orders_customer
+    from: {input: orders, columns: [customer_id]}
+    to: {input: customers, columns: [customer_id]}
+    cardinality: many_to_one
+
+scenarios:
+  - nulls
+  - duplicates
+  - join_amplification
+  - numeric_edges
+  - determinism
+
+invariants:
+  - type: unique_key
+    dataset: output
+    columns: [country]
+  - type: no_unexpected_nulls
+    dataset: output
+    columns: [total_amount]
+  - type: no_join_amplification
+    relationship: orders_customer
+    input: orders
+    input_column: amount
+    output_column: total_amount
+    rtol: 1.0e-9
+    atol: 1.0e-12
+  - type: deterministic_output
+    rtol: 1.0e-9
+    atol: 1.0e-12</code></pre>
+
+<h2 id="top-level-fields">Top-level fields</h2>
+<div class="table-wrap"><table>
+  <thead><tr><th>Field</th><th>Required / default</th><th>Meaning</th></tr></thead>
+  <tbody>
+    <tr><td><code>version</code></td><td>Required: <code>1</code></td><td>The configuration format version.</td></tr>
+    <tr><td><code>inputs</code></td><td>Required</td><td>A nonempty mapping of input names to input definitions. Each name becomes a keyword argument to the transformation.</td></tr>
+    <tr><td><code>relationships</code></td><td>Default: <code>[]</code></td><td>A list of declared many-to-one joins.</td></tr>
+    <tr><td><code>scenarios</code></td><td>Required</td><td>A nonempty list of supported scenario names, with no duplicates. Scenarios run in the listed order.</td></tr>
+    <tr><td><code>invariants</code></td><td>Required</td><td>A nonempty list of checks. More than one check of the same type is allowed.</td></tr>
+  </tbody>
+</table></div>
+<p>Unknown field names are rejected. The target function, seed, verbosity, and example budget are <a href="cli.html">CLI options</a>, not YAML fields.</p>
+
+<h2 id="inputs">Input definitions</h2>
+<p>Give every input a nonempty name matching a transformation parameter. Each input accepts exactly these fields:</p>
+<div class="table-wrap"><table>
+  <thead><tr><th>Field</th><th>Required / default</th><th>Rules</th></tr></thead>
+  <tbody>
+    <tr><td><code>schema</code></td><td>Required</td><td>A nonempty list of column definitions. Column names must be unique within the input.</td></tr>
+    <tr><td><code>primary_key</code></td><td>Optional; omitted means no declared key</td><td>When present, a nonempty list of distinct column names from this input's schema.</td></tr>
+    <tr><td><code>rows.min</code></td><td><code>0</code></td><td>An integer, not a boolean.</td></tr>
+    <tr><td><code>rows.max</code></td><td><code>4</code></td><td>An integer, not a boolean. Together the limits must satisfy <code>0 &lt;= min &lt;= max &lt;= 20</code>.</td></tr>
+  </tbody>
+</table></div>
+<p>The <code>rows</code> mapping itself is optional. Scenarios use the smallest row count needed for their structure or the configured minimum, whichever is larger. Increasing <code>max</code> permits a scenario to run; it does not make PipeFuzz sweep every row count up to that limit. Unselected inputs can be empty when their minimum is zero.</p>
+<aside class="callout"><p><strong>A declared key is not a check.</strong> <code>primary_key</code> records intent and validates the column names. It does not enforce uniqueness, exclude NULLs, or add an invariant. Use <code>unique_key</code> and, when needed, <code>no_unexpected_nulls</code> to assert those properties. Adversarial scenarios can deliberately repeat declared keys.</p></aside>
+
+<h2 id="schema-types">Columns and supported types</h2>
+<p>Every schema entry must provide a nonempty <code>name</code>, a string <code>type</code>, and a boolean <code>nullable</code>. None of these fields has a default. Write unquoted <code>true</code> or <code>false</code> for nullability.</p>
+<pre><code class="language-yaml">schema:
+  - name: amount
+    type: "decimal(12,2)"
+    nullable: false
+  - name: recorded_at
+    type: timestamp
+    nullable: true</code></pre>
+<div class="table-wrap"><table>
+  <thead><tr><th>Type</th><th>Spark type</th><th>Numeric for checks?</th></tr></thead>
+  <tbody>
+    <tr><td><code>string</code></td><td><code>StringType</code></td><td>No</td></tr>
+    <tr><td><code>integer</code></td><td><code>IntegerType</code> (32-bit)</td><td>Yes</td></tr>
+    <tr><td><code>long</code></td><td><code>LongType</code> (64-bit)</td><td>Yes</td></tr>
+    <tr><td><code>float</code></td><td><code>FloatType</code> (32-bit)</td><td>Yes</td></tr>
+    <tr><td><code>double</code></td><td><code>DoubleType</code> (64-bit)</td><td>Yes</td></tr>
+    <tr><td><code>decimal(p,s)</code></td><td><code>DecimalType(p,s)</code></td><td>Yes</td></tr>
+    <tr><td><code>boolean</code></td><td><code>BooleanType</code></td><td>No</td></tr>
+    <tr><td><code>timestamp</code></td><td><code>TimestampType</code></td><td>No</td></tr>
+  </tbody>
+</table></div>
+<p>Decimal precision must be from 1 to 38, and scale must be from 0 to precision. Quote decimal types in inline YAML mappings because the type contains a comma. Type names are normalized to lowercase, with surrounding whitespace and ordinary spaces removed. Aliases such as <code>int</code>, and input types such as dates, arrays, maps, or structs, are not supported in version 1.</p>
+<p><code>nullable: false</code> controls the generated input schema and values. It does not make a promise about the transformation's output. Add an output invariant if the result must contain no NULLs.</p>
+
+<h2 id="relationships">Relationships</h2>
+<p>A relationship describes the intended direction of a join: <code>from</code> is the many side, such as orders, and <code>to</code> is the one side, such as customers. The join scenario deliberately creates duplicate matching rows on the one side.</p>
+<pre><code class="language-yaml">relationships:
+  - name: orders_customer
+    from:
+      input: orders
+      columns: [customer_id]
+    to:
+      input: customers
+      columns: [customer_id]
+    cardinality: many_to_one</code></pre>
+<ul>
+  <li><code>name</code>, <code>from</code>, <code>to</code>, and <code>cardinality</code> are required. Relationship names must be nonempty and unique.</li>
+  <li>Each endpoint requires an existing <code>input</code> and a nonempty <code>columns</code> list of distinct names in that input's schema.</li>
+  <li>The endpoints must name different inputs and have the same number of columns. Composite keys match by position; each paired column must have the same normalized type.</li>
+  <li><code>many_to_one</code> is the only supported cardinality. Declaring a relationship does not automatically check key uniqueness or referential integrity.</li>
+</ul>
+
+<h2 id="scenario-settings">Scenario settings</h2>
+<p>Choose at least one of the following names. These requirements are checked when the configuration loads; there are no additional per-scenario YAML options. See <a href="checks.html#scenarios">how scenarios generate data</a> for their exact behavior.</p>
+<div class="table-wrap"><table>
+  <thead><tr><th>Scenario</th><th>Configuration requirement</th></tr></thead>
+  <tbody>
+    <tr><td><code>nulls</code></td><td>At least one nullable column on an input whose <code>rows.max</code> is at least 1.</td></tr>
+    <tr><td><code>duplicates</code></td><td>At least one input whose <code>rows.max</code> is at least 2.</td></tr>
+    <tr><td><code>join_amplification</code></td><td>At least one relationship. For every declared relationship, the <code>from</code> input must allow at least 1 row and the <code>to</code> input must allow at least 2.</td></tr>
+    <tr><td><code>numeric_edges</code></td><td>At least one numeric column on an input whose <code>rows.max</code> is at least 1.</td></tr>
+    <tr><td><code>determinism</code></td><td>At least one input whose <code>rows.max</code> is at least 1.</td></tr>
+  </tbody>
+</table></div>
+
+<h2 id="invariant-settings">Invariant settings</h2>
+<p>Every invariant requires a <code>type</code>. The table lists the fields used by each type. For <code>dataset</code>, use an input name or the special name <code>output</code> for the returned DataFrame. Prefer another name for an input so that it does not conflict with <code>output</code>.</p>
+<div class="table-wrap"><table>
+  <thead><tr><th>Type</th><th>Required fields</th><th>Additional rules</th></tr></thead>
+  <tbody>
+    <tr><td><a href="checks.html#unique-key"><code>unique_key</code></a></td><td><code>dataset</code>, <code>columns</code></td><td>Columns form the complete key tuple. The list must be nonempty and contain distinct names.</td></tr>
+    <tr><td><a href="checks.html#no-unexpected-nulls"><code>no_unexpected_nulls</code></a></td><td><code>dataset</code>, <code>columns</code></td><td>Every listed column must have no NULL values. The list must be nonempty and contain distinct names.</td></tr>
+    <tr><td><a href="checks.html#no-join-amplification"><code>no_join_amplification</code></a></td><td><code>relationship</code>, <code>input</code>, <code>input_column</code>, <code>output_column</code></td><td>The relationship must exist. <code>input</code> must equal its <code>from.input</code>, and <code>input_column</code> must be a numeric column in that input. Column references are individual names, not expressions.</td></tr>
+    <tr><td><a href="checks.html#deterministic-output"><code>deterministic_output</code></a></td><td>No fields beyond <code>type</code></td><td>The <code>determinism</code> scenario must be enabled.</td></tr>
+  </tbody>
+</table></div>
+<p>Input column references are checked while loading YAML. Output column references are checked after the transformation produces a DataFrame; an absent column is a configuration error. Output schemas are not declared in this format.</p>
+<p>The parser recognizes <code>type</code>, <code>dataset</code>, <code>columns</code>, <code>relationship</code>, <code>input</code>, <code>input_column</code>, <code>output_column</code>, <code>rtol</code>, and <code>atol</code> within invariant definitions. Use the fields for the selected type: recognized fields belonging to another type may be ignored.</p>
+
+<h2 id="tolerances">Tolerance defaults</h2>
+<p>Each invariant accepts optional <code>rtol</code> and <code>atol</code>, defaulting to <code>1.0e-9</code> and <code>1.0e-12</code>. Values must be finite, nonnegative numbers, not strings or booleans. These options affect only <code>no_join_amplification</code> and floating-point comparisons in <code>deterministic_output</code>; key and NULL checks do not use them.</p>
+<p>The formulas differ by check. Join amplification allows <code>atol + rtol × input_absolute_total</code>. Determinism uses Python's <code>math.isclose</code> for floats. See <a href="checks.html#tolerance-formulas">the formulas and value comparison rules</a> before changing these settings.</p>
+
+<h2 id="configuration-errors">Common configuration errors</h2>
+<ul>
+  <li>A missing <code>nullable</code>, empty schema, unknown type, or unsupported field name.</li>
+  <li>A list supplied where a mapping is expected, or a mapping supplied where a list is expected.</li>
+  <li>A misspelled input, relationship, or column reference.</li>
+  <li>Row bounds that cannot accommodate a selected scenario.</li>
+  <li><code>deterministic_output</code> configured without the <code>determinism</code> scenario.</li>
+</ul>
+<p>For command syntax, configuration discovery, and exit codes, continue to the <a href="cli.html">CLI reference</a>.</p>

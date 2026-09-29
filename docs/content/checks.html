@@ -1,0 +1,120 @@
+<p class="lead">Scenarios decide which difficult inputs to generate. Invariants decide what counts as a failure. Choose both explicitly so each run tests the properties your transformation is meant to preserve.</p>
+
+<h2 id="scenarios">The five scenarios</h2>
+<p>Scenarios use small templates with compact values. They satisfy the required adversarial structure while respecting the configured minimum row counts. The maximum row count is a bound, not a promise to generate that many rows. A finite run explores a sample of possible cases; passing is not proof for every input.</p>
+<div class="table-wrap"><table>
+  <thead><tr><th>Name</th><th>Generated case</th><th>Useful for</th></tr></thead>
+  <tbody>
+    <tr><td><code>nulls</code></td><td>Selects an eligible input and nullable column, creates at least one row, and sets that column to NULL in the first row. Other values in that selected row are non-null compact values.</td><td>NULL propagation, missing-value handling, and transformations that assume values always exist.</td></tr>
+    <tr><td><code>duplicates</code></td><td>Selects an input that allows at least two rows and makes its first two records identical.</td><td>Deduplication logic and checks that output keys stay unique when inputs repeat.</td></tr>
+    <tr><td><code>join_amplification</code></td><td>Selects a declared relationship, coordinates its join keys, creates at least one source row, and creates at least two identical matching target rows.</td><td>Detecting measure inflation from duplicate dimension rows in an intended many-to-one join.</td></tr>
+    <tr><td><code>numeric_edges</code></td><td>Selects an eligible numeric column and puts an edge value in the first row. Other fields use type-appropriate default values.</td><td>Zero, negative values, bounded extremes, and arithmetic assumptions.</td></tr>
+    <tr><td><code>determinism</code></td><td>Populates the first input that permits a row with compact non-null values. When <code>deterministic_output</code> is configured, runs the transformation twice using the same input DataFrames.</td><td>Changes in returned values between repeated calls, such as unseeded randomness or a changing timestamp.</td></tr>
+  </tbody>
+</table></div>
+<p>Inputs not selected by the scenario use their minimum number of rows filled with type-appropriate defaults: zero, an empty string, <code>false</code>, or a fixed UTC timestamp. Join cases use these defaults for non-key fields too, except that measures referenced by a matching <code>no_join_amplification</code> check are set to a positive unit. For decimals, that unit is <code>10<sup>−scale</sup></code>.</p>
+<p>Scenario names go in the top-level list. This is a fragment to add to a configuration with eligible schemas and a relationship:</p>
+<pre><code class="language-yaml">scenarios:
+  - nulls
+  - duplicates
+  - join_amplification
+  - numeric_edges
+  - determinism</code></pre>
+<p>The <a href="configuration.html#scenario-settings">configuration reference</a> lists the required row limits and column types for each scenario. Non-join scenarios do not coordinate relationship keys across inputs.</p>
+
+<h2 id="numeric-edge-values">Numeric edge values</h2>
+<p>The numeric scenario samples the following sets. Floating-point generation uses finite values; it does not generate NaN or infinity. Decimal edges are deliberately capped and do not cover every value representable by high-precision decimals.</p>
+<div class="table-wrap"><table>
+  <thead><tr><th>Type</th><th>Candidate edge values</th></tr></thead>
+  <tbody>
+    <tr><td><code>integer</code></td><td><code>0</code>, <code>1</code>, <code>−1</code>, <code>−2147483648</code>, <code>2147483647</code></td></tr>
+    <tr><td><code>long</code></td><td><code>0</code>, <code>1</code>, <code>−1</code>, <code>−9223372036854775808</code>, <code>9223372036854775807</code></td></tr>
+    <tr><td><code>float</code>, <code>double</code></td><td><code>0.0</code>, <code>1.0</code>, <code>−1.0</code>, <code>−1000000.0</code>, <code>1000000.0</code></td></tr>
+    <tr><td><code>decimal(p,s)</code></td><td>Unscaled values <code>0</code>, <code>1</code>, <code>−1</code>, <code>−M</code>, <code>M</code>, multiplied by <code>10<sup>−s</sup></code>, where <code>M = min(10<sup>p</sup> − 1, 1000000)</code>.</td></tr>
+  </tbody>
+</table></div>
+
+<h2 id="when-checks-run">When checks run</h2>
+<p><code>unique_key</code>, <code>no_unexpected_nulls</code>, and <code>no_join_amplification</code> run for every generated case in every enabled scenario. <code>deterministic_output</code> runs only in the <code>determinism</code> scenario. Enabling that scenario alone does not add a comparison check; configure the invariant too.</p>
+<p>Scenarios run in configuration order. When a case fails, Hypothesis attempts to shrink it within that scenario's strategy, and PipeFuzz reports the failure and stops the run. A report therefore does not mean that all later scenarios were exercised. A transformation exception also fails the run even if no invariant has been evaluated.</p>
+
+<h2 id="unique-key">unique_key</h2>
+<p>Checks that each tuple of configured column values occurs at most once in the chosen dataset. For a compound key, it checks the combination, not each column separately. <code>dataset</code> can be an input name or <code>output</code>.</p>
+<pre><code class="language-yaml">invariants:
+  - type: unique_key
+    dataset: output
+    columns: [customer_id, order_date]</code></pre>
+<p>The column names in this fragment must exist in the returned DataFrame. Repeated tuples containing NULL count as duplicates; a single NULL key can pass. Repeated floating NaNs are normalized for duplicate detection. The check does not apply approximate numeric tolerances. Empty datasets pass.</p>
+<p>For a non-null unique key, also add <code>no_unexpected_nulls</code> for the same columns. An input-level uniqueness check can intentionally fail the <code>duplicates</code> scenario: that scenario generates duplicate input records.</p>
+
+<h2 id="no-unexpected-nulls">no_unexpected_nulls</h2>
+<p>Counts NULL values in every listed column. Any nonzero count fails the check and is included in the failure context.</p>
+<pre><code class="language-yaml">invariants:
+  - type: no_unexpected_nulls
+    dataset: output
+    columns: [total_amount]</code></pre>
+<p>This checks actual values, independently of the column's declared nullability. An empty string, zero, or floating NaN is not NULL. Empty datasets pass. Configure an input name as <code>dataset</code> to inspect generated inputs, or <code>output</code> to inspect the transformation result.</p>
+
+<h2 id="no-join-amplification">no_join_amplification</h2>
+<p>Checks a measure that the transformation is expected to conserve or reduce. It sums the absolute value of each non-null input measure and compares that total with the same calculation on the selected output column.</p>
+<pre><code class="language-yaml">invariants:
+  - type: no_join_amplification
+    relationship: orders_customer
+    input: orders
+    input_column: amount
+    output_column: total_amount
+    rtol: 1.0e-9
+    atol: 1.0e-12</code></pre>
+<p>This fragment uses the <code>orders_customer</code> relationship from the <a href="configuration.html#complete-example">complete configuration</a>. The input must be that relationship's <code>from</code> input, and its selected column must have a numeric schema type.</p>
+<pre><code class="language-text">input_total  = sum(abs(value) for each non-NULL input value)
+output_total = sum(abs(value) for each non-NULL output value)
+tolerance    = atol + rtol * input_total
+
+pass when output_total &lt;= input_total + tolerance</code></pre>
+<p>For input values <code>100</code> and <code>−100</code>, the total is <code>200</code>. Taking the absolute value after summing would give zero and is not the calculation used here. The check also catches amplification of negative values.</p>
+<ul>
+  <li>NULL values contribute nothing to either total. Empty inputs or outputs have a total of zero.</li>
+  <li>Non-finite floating-point values make this check fail. A missing output column or a value that cannot be interpreted numerically is a configuration error.</li>
+  <li>Totals use Decimal arithmetic; non-Decimal values are converted through their string representation.</li>
+  <li>The failure context includes the relationship, column names, both absolute totals, and the computed tolerance.</li>
+</ul>
+<aside class="callout"><p><strong>Choose a measure whose meaning fits the check.</strong> This compares whole-dataset totals. It does not inspect a query plan, prove join cardinality, check each key, or detect data loss. A reduction in output can pass. Legitimate transformations that increase a measure can fail. Use additional checks for other requirements.</p></aside>
+
+<h2 id="deterministic-output">deterministic_output</h2>
+<p>Calls the transformation twice for each determinism case and compares the materialized outputs. Both calls receive the same input DataFrames within the run's local Spark session.</p>
+<pre><code class="language-yaml">scenarios: [determinism]
+invariants:
+  - type: deterministic_output
+    rtol: 1.0e-9
+    atol: 1.0e-12</code></pre>
+<p>Add the fragment above to an input configuration with at least one input that allows a row. Outputs are compared as unordered multisets: row order can change, but each row must have a matching counterpart and duplicate counts must match.</p>
+<div class="table-wrap"><table>
+  <thead><tr><th>Part of the output</th><th>Comparison rule</th></tr></thead>
+  <tbody>
+    <tr><td>Schema</td><td>Exact schema snapshot equality, including field order, types, nullability, and metadata.</td></tr>
+    <tr><td>Row count</td><td>Must match exactly.</td></tr>
+    <tr><td>NULL</td><td>Matches only NULL.</td></tr>
+    <tr><td>Finite floats</td><td>Compared using relative and absolute tolerances.</td></tr>
+    <tr><td>Floating NaN and infinity</td><td>NaN matches NaN; infinities must have the same sign.</td></tr>
+    <tr><td>Decimals</td><td>Both values must be Decimal values and compare equal; floating tolerances do not apply.</td></tr>
+    <tr><td>Timestamps</td><td>Normalized to UTC. A timestamp without a timezone is treated as UTC.</td></tr>
+    <tr><td>Nested output values</td><td>Dictionaries and Spark rows compare recursively; lists and tuples compare in element order.</td></tr>
+    <tr><td>Other scalar values</td><td>The Python value type and value must match exactly.</td></tr>
+  </tbody>
+</table></div>
+<p>The check concerns returned data from repeated calls. It does not test row ordering, persisted sinks, stateful pipeline idempotency, or results across different Spark sessions. Two matching calls do not establish determinism for every possible execution.</p>
+
+<h2 id="tolerance-formulas">Two tolerance formulas</h2>
+<p>Both relevant invariant types default to <code>rtol = 1e-9</code> and <code>atol = 1e-12</code>, but they use those numbers differently.</p>
+<div class="table-wrap"><table>
+  <thead><tr><th>Check</th><th>Allowed difference</th></tr></thead>
+  <tbody>
+    <tr><td>Join amplification</td><td>Output total may exceed input total by at most <code>atol + rtol × input_total</code>. This is a one-sided upper bound.</td></tr>
+    <tr><td>Deterministic finite floats</td><td><code>abs(a − b) &lt;= max(atol, rtol × max(abs(a), abs(b)))</code>, following <code>math.isclose</code>.</td></tr>
+  </tbody>
+</table></div>
+<p>Use finite, nonnegative YAML numbers. For example, write <code>1.0e-9</code> rather than a quoted string. Setting both values to zero removes the numerical allowance in these comparisons.</p>
+
+<h2 id="choosing-checks">Choosing a useful combination</h2>
+<p>Start with a property your transformation must preserve. For a customer join that must not inflate order amounts, declare the relationship, enable <code>join_amplification</code>, and add <code>no_join_amplification</code>. For a deduplication transformation, pair <code>duplicates</code> with an output <code>unique_key</code> check. For required output values, pair <code>nulls</code> with <code>no_unexpected_nulls</code>, ensuring the schema allows a meaningful NULL input.</p>
+<p>Review the minimized records in a failure report to decide whether the transformation violates its contract or the configured property does not match its intended behavior. Continue with the <a href="examples.html">broken and safe join examples</a>, or return to the <a href="configuration.html">complete YAML reference</a>.</p>
