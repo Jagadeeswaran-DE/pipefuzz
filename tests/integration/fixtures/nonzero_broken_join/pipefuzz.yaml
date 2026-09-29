@@ -1,0 +1,25 @@
+version: 1
+inputs:
+  orders:
+    schema:
+      - {name: customer_id, type: integer, nullable: false}
+      - {name: amount, type: double, nullable: false}
+    rows: {min: 1, max: 3}
+  customers:
+    schema:
+      - {name: customer_id, type: integer, nullable: false}
+      - {name: country, type: string, nullable: false}
+    primary_key: [customer_id]
+    rows: {min: 1, max: 3}
+relationships:
+  - name: orders_customer
+    from: {input: orders, columns: [customer_id]}
+    to: {input: customers, columns: [customer_id]}
+    cardinality: many_to_one
+scenarios: [join_amplification]
+invariants:
+  - type: no_join_amplification
+    relationship: orders_customer
+    input: orders
+    input_column: amount
+    output_column: total_amount

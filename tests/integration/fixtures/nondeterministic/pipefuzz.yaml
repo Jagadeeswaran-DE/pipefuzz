@@ -1,0 +1,11 @@
+version: 1
+inputs:
+  events:
+    schema:
+      - {name: id, type: integer, nullable: false}
+    rows: {min: 1, max: 2}
+relationships: []
+scenarios: [determinism]
+invariants:
+  - {type: deterministic_output}
+

@@ -1,0 +1,12 @@
+version: 1
+inputs:
+  events:
+    schema:
+      - {name: id, type: integer, nullable: false}
+      - {name: value, type: string, nullable: true}
+    rows: {min: 1, max: 2}
+relationships: []
+scenarios: [nulls]
+invariants:
+  - {type: no_unexpected_nulls, dataset: output, columns: [required_value]}
+

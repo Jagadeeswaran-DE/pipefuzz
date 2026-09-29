@@ -1,0 +1,17 @@
+.tools/
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.pytest-tmp/
+.hypothesis/
+.coverage
+htmlcov/
+build/
+dist/
+*.egg-info/
+.sparkStaging/
+.pipefuzz/
+metastore_db/
+derby.log
+spark-warehouse/
